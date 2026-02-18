@@ -479,38 +479,38 @@ class WhatsAppApiService extends BaseEngine implements WhatsAppServiceEngineInte
         ];
 
         // ===== MEDIA HEADER SUPPORT =====
-        // Check for media_url (from bot flows) or media_link (legacy)
+        // Only allow Meta (WhatsApp) media ID, never send direct media URLs
         $mediaUrl = $messageData['media_url'] ?? $messageData['media_link'] ?? '';
-        // Check for media_type (from bot flows) or header_type (legacy)
         $mediaType = $messageData['media_type'] ?? $messageData['header_type'] ?? '';
-        // Optional media_id provided by caller
         $mediaId = $messageData['media_id'] ?? $messageData['header_media_id'] ?? null;
 
-        // Try WhatsApp media upload first to avoid link download rate limits (bot flows too)
+        // Always upload to WhatsApp if mediaId is not provided
         if (empty($mediaId) && !empty($mediaUrl) && !empty($mediaType) && $mediaType !== 'text') {
             $uploadResult = $this->uploadMedia($mediaUrl);
             if (is_array($uploadResult) && isset($uploadResult['id'])) {
                 $mediaId = $uploadResult['id'];
+            } else {
+                // If upload fails, return error and do not send the message
+                \Log::error('Failed to upload media to WhatsApp. Aborting sendInteractiveMessage.', [
+                    'media_url' => $mediaUrl,
+                    'media_type' => $mediaType,
+                    'upload_result' => $uploadResult
+                ]);
+                return [
+                    'success' => false,
+                    'error' => 'Failed to upload media to WhatsApp. Please try again with a valid file.'
+                ];
             }
         }
-        
-        if (!empty($mediaUrl) && !empty($mediaType) && $mediaType !== 'text') {
-            // Determine the media key for the payload
+
+        if (!empty($mediaId) && !empty($mediaType) && $mediaType !== 'text') {
             $mediaKey = $mediaType === 'image' ? 'image' :
                        ($mediaType === 'video' ? 'video' :
                        ($mediaType === 'document' ? 'document' : 'image'));
-            // Always use Meta ID if available, never send link if ID exists
-            if ($mediaId) {
-                $interactiveData['header'] = [
-                    'type' => $mediaType,
-                    $mediaKey => ['id' => $mediaId]
-                ];
-            } else {
-                $interactiveData['header'] = [
-                    'type' => $mediaType,
-                    $mediaKey => ['link' => $mediaUrl]
-                ];
-            }
+            $interactiveData['header'] = [
+                'type' => $mediaType,
+                $mediaKey => ['id' => $mediaId]
+            ];
             // Caption only supported in images & video (not documents)
             if (!empty($messageData['caption']) && $mediaType !== 'document') {
                 $interactiveData['header'][$mediaKey]['caption'] = $messageData['caption'];
@@ -523,17 +523,17 @@ class WhatsAppApiService extends BaseEngine implements WhatsAppServiceEngineInte
             // Text header
             $interactiveData['header'] = [
                 'type' => 'text',
-                'text' => $messageData['header_text'], // Your header text here
+                'text' => $messageData['header_text'],
             ];
         }
         if ($messageData['body_text']) {
             $interactiveData['body'] = [
-                'text' => $messageData['body_text'], // Your footer text here
+                'text' => $messageData['body_text'],
             ];
         }
         if ($messageData['footer_text']) {
             $interactiveData['footer'] = [
-                'text' => $messageData['footer_text'], // Your footer text here
+                'text' => $messageData['footer_text'],
             ];
         }
         if ($messageData['interactive_type'] == 'list') {
@@ -728,27 +728,38 @@ class WhatsAppApiService extends BaseEngine implements WhatsAppServiceEngineInte
             $this->vendorId = $vendorId;
         }
 
-        // Accept either a public URL or a WhatsApp media_id. Prefer id when provided.
         $typeDetails = [];
+        $mediaId = $mediaLinkOrId;
 
+        // Always upload to Meta if a URL is provided
         if (Str::startsWith($mediaLinkOrId, 'http')) {
-            $typeDetails['link'] = $mediaLinkOrId;
-        } else {
-            // treat as WhatsApp media id
-            $typeDetails['id'] = $mediaLinkOrId;
+            $uploadResult = $this->uploadMedia($mediaLinkOrId);
+            if (is_array($uploadResult) && isset($uploadResult['id'])) {
+                $mediaId = $uploadResult['id'];
+            } else {
+                \Log::error('Failed to upload media to WhatsApp. Aborting sendMediaMessage.', [
+                    'media_url' => $mediaLinkOrId,
+                    'media_type' => $type,
+                    'upload_result' => $uploadResult
+                ]);
+                return [
+                    'success' => false,
+                    'error' => 'Failed to upload media to WhatsApp. Please try again with a valid file.'
+                ];
+            }
         }
+
+        $typeDetails['id'] = $mediaId;
 
         // if not audio or sticker
         if (! in_array($type, [
             'audio',
             'sticker',
         ])) {
-            // caption supported for images & video (and also accepted with id)
             if (! empty($caption)) {
                 $typeDetails['caption'] = $caption;
             }
         }
-        // if its document
         if (in_array($type, [
             'document',
         ])) {
