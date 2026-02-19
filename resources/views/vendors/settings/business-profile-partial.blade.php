@@ -1,4 +1,4 @@
-<x-lw.modal id="lwBusinessProfileUpdate" :header="__tr('Update Business Profile')" :hasForm="true">
+<x-lw.modal id="lwBusinessProfileUpdate" :header="__tr('Update Business Profile')" :hasForm="true" data-init-uploader="true">
     <!--  Edit Contact Form -->
     <x-lw.form id="lwBusinessProfileUpdateForm" :action="route('vendor.whatsapp.business_profile.write')"
         :data-callback-params="['modalId' => '#lwBusinessProfileUpdate']" data-callback="appFuncs.modelSuccessCallback">

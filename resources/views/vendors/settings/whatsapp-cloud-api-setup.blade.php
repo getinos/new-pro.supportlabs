@@ -529,9 +529,11 @@
                 data-pre-callback="appFuncs.clearContainer"
                 title="{{ __tr('Update Business Profile') }}"
                 class="lw-btn btn btn-sm btn-outline-dark lw-ajax-link-action"
+                data-business-profile="true"
+                data-response-template="#lwBusinessProfileUpdateBody"
                 x-bind:href="__Utils.apiURL(
-                    '{{ route('vendor.whatsapp.business_profile.read', ['phoneNUmberId']) }}',
-                    { phoneNUmberId: whatsAppPhoneNumber.id }
+                    '{{ route('vendor.whatsapp.business_profile.read', ['phoneNumberId']) }}',
+                    { phoneNumberId: whatsAppPhoneNumber.id }
                 )"
                 data-toggle="modal"
                 data-target="#lwBusinessProfileUpdate">

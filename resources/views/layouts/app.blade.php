@@ -1,4 +1,3 @@
-
 @php
 $hasActiveLicense = true;
 if(isLoggedIn() and (request()->route()->getName() != 'manage.configuration.product_registration') and (!getAppSettings('product_registration', 'registration_id') or sha1(array_get($_SERVER, 'HTTP_HOST', '') . getAppSettings('product_registration', 'registration_id') . '4.5+') !== getAppSettings('product_registration', 'signature'))) {
@@ -185,6 +184,8 @@ if(isLoggedIn() and (request()->route()->getName() != 'manage.configuration.prod
     <?= __yesset(['dist/js/common-vendorlibs.js','dist/js/vendorlibs.js', 'argon/bootstrap/dist/js/bootstrap.bundle.min.js', 'argon/js/argon.js'], true) ?>
     @stack('js')
     @if (hasVendorAccess() or hasVendorUserAccess())
+    {{-- Business Profile Update Modal --}}
+    @include('vendors.settings.business-profile-partial')
     {{-- QR CODE model --}}
     <x-lw.modal id="lwScanMeDialog" :header="__tr('Scan QR Code to Start Chat')">
         @if (getVendorSettings('current_phone_number_number'))
@@ -387,47 +388,157 @@ if(isLoggedIn() and (request()->route()->getName() != 'manage.configuration.prod
 @endpush
     @stack('scripts')
     <script>
-        // Auto-scroll sidebar to active menu item on page load
-        (function() {
-            'use strict';
-            
-            function scrollToActiveMenuItem() {
-                var sidebar = document.getElementById('sidenav-main');
-                if (!sidebar) return;
-                
-                // Find the active menu item
-                var activeItem = sidebar.querySelector('.nav-link.active, .nav-link-ul.active');
-                
-                if (activeItem) {
-                    // Calculate position relative to sidebar container
-                    var scrollOffset = 100;
-                    var currentScrollTop = sidebar.scrollTop;
-                    var sidebarTop = sidebar.getBoundingClientRect().top;
-                    var itemTop = activeItem.getBoundingClientRect().top;
-                    var relativeTop = itemTop - sidebarTop;
-                    
-                    // Calculate the target scroll position
-                    var targetScrollTop = currentScrollTop + relativeTop - scrollOffset;
-                    
-                    // Ensure scroll position is not negative
-                    targetScrollTop = Math.max(0, targetScrollTop);
-                    
-                    // Scroll to the active item
-                    sidebar.scrollTop = targetScrollTop;
+    // Strict business-profile modal loader (only the dedicated button opens this modal)
+    // Uses a specific attribute `data-business-profile` to avoid accidental interception.
+    document.addEventListener('DOMContentLoaded', function() {
+        document.body.addEventListener('click', function(e) {
+            var target = e.target.closest('a.lw-ajax-link-action[data-business-profile]');
+            if (!target) return; // don't touch other lw-ajax-link-action clicks
+
+            // Respect explicit non-GET actions
+            var dataMethod = (target.getAttribute('data-method') || '').toLowerCase();
+            if (dataMethod && dataMethod !== 'get') return;
+
+            var dataTarget = target.getAttribute('data-target') || target.getAttribute('data-modal') || '';
+            if (dataTarget !== '#lwBusinessProfileUpdate') return; // extra safety
+
+            var url = target.getAttribute('href') || target.getAttribute('x-bind:href') || target.getAttribute('data-href');
+            if (!url || url.indexOf('/business-profile') === -1) return;
+
+            e.preventDefault();
+            console.debug('[BusinessProfile] fetching URL:', url);
+
+            var modalBody = document.getElementById('lwBusinessProfileUpdateBody');
+            if (modalBody) modalBody.innerHTML = '<div style="text-align:center;padding:2em;">Loading...</div>';
+
+            fetch(url, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                },
+                credentials: 'same-origin'
+            })
+            .then(function(response) {
+                var contentType = response.headers.get('content-type') || '';
+                if (contentType.indexOf('application/json') !== -1) return response.json().then(function(j){ return { json: j }; });
+                return response.text().then(function(t){ return { html: t }; });
+            })
+            .then(function(result) {
+                if (result.html) {
+                    if (modalBody) modalBody.innerHTML = result.html;
+                } else if (result.json) {
+                    console.error('[BusinessProfile] unexpected JSON response', result.json);
+                    if (typeof showErrorMessage === 'function' && result.json.message) {
+                        showErrorMessage(result.json.message);
+                    }
+                    if (modalBody) modalBody.innerHTML = '<div class="alert alert-danger text-center">'+(result.json.message || 'Unexpected response')+'</div>';
+                    return;
                 }
-            }
+
+                // Initialize FilePond uploader if present
+                if (typeof window.initUploader === 'function' && modalBody && modalBody.querySelector('.lw-file-uploader')) {
+                    try { window.initUploader(); } catch (e) { console.warn('initUploader failed', e); }
+                }
+
+                // Re-init other plugins (selectize, datepickers, etc.) using the project's helper
+                if (window.__Utils && typeof window.__Utils.lwReInitPlugins === 'function') {
+                    try { window.__Utils.lwReInitPlugins($(modalBody)); } catch (e) { console.warn('lwReInitPlugins failed', e); }
+                } else if (typeof lwPluginsInit === 'function') {
+                    try { lwPluginsInit('#lwBusinessProfileUpdateBody'); } catch (e) { console.warn('lwPluginsInit failed', e); }
+                }
+
+                // Defensive: ensure the injected form is not left in a "processing" state
+                (function ensureFormEnabled() {
+                    var formEl = document.getElementById('lwBusinessProfileUpdateForm');
+                    if (!formEl) return;
+                    // remove any leftover processing/disabled classes
+                    formEl.classList.remove('lw-form-processing', 'lw-form-in-process', 'lw-form-has-errors');
+                    formEl.removeAttribute('disabled');
+                    // enable all form controls
+                    Array.prototype.slice.call(formEl.querySelectorAll('input,textarea,select,button')).forEach(function(el) {
+                        try { el.disabled = false; el.removeAttribute('readonly'); } catch (err) { /* ignore */ }
+                    });
+                    // re-run validation init for the form (if available)
+                    try { if (window.__DataRequest && typeof window.__DataRequest.__formValidateInit === 'function') window.__DataRequest.__formValidateInit($(formEl)); } catch (e) { console.warn('formValidateInit failed', e); }
+                })();
+
+                var modal = document.getElementById('lwBusinessProfileUpdate');
+                if (modal) {
+                    if (typeof $ !== 'undefined' && $.fn.modal) {
+                        $(modal).modal('show');
+                    } else {
+                        modal.style.display = 'block';
+                    }
+                }
+            })
+            .catch(function(err) {
+                console.error('[BusinessProfile] fetch failed', err);
+                if (modalBody) modalBody.innerHTML = '<div style="color:red;text-align:center;">Failed to load data.</div>';
+            });
+        });
+
+        // Defensive: prevent raw JSON being shown inside the business-profile modal body
+        var bpBody = document.getElementById('lwBusinessProfileUpdateBody');
+        if (bpBody && window.MutationObserver) {
+            var obs = new MutationObserver(function(mutations) {
+                mutations.forEach(function(m) {
+                    if (!bpBody.innerText) return;
+                    var text = bpBody.innerText.trim();
+                    // crude check for JSON payload accidentally injected
+                    if (text.startsWith('{') || text.startsWith('[') || /"error"|"message"/.test(text)) {
+                        console.warn('[BusinessProfile] blocked raw JSON injection into modal body');
+                        var msg = 'Unexpected response from server. Check logs.';
+                        if (typeof showErrorMessage === 'function') showErrorMessage(msg);
+                        bpBody.innerHTML = '<div class="alert alert-danger text-center">'+msg+'</div>';
+                    }
+                });
+            });
+            obs.observe(bpBody, { childList: true, subtree: true, characterData: true });
+        }
+    });
+    </script>
+    <script>
+    // Auto-scroll sidebar to active menu item on page load
+    (function() {
+        'use strict';
+        
+        function scrollToActiveMenuItem() {
+            var sidebar = document.getElementById('sidenav-main');
+            if (!sidebar) return;
             
-            // Run after DOM is fully loaded
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', scrollToActiveMenuItem);
-            } else {
-                // DOM is already loaded
-                scrollToActiveMenuItem();
-            }
+            // Find the active menu item
+            var activeItem = sidebar.querySelector('.nav-link.active, .nav-link-ul.active');
             
-            // Also run after a short delay to ensure all dynamic content is rendered
-            setTimeout(scrollToActiveMenuItem, 100);
-        })();
+            if (activeItem) {
+                // Calculate position relative to sidebar container
+                var scrollOffset = 100;
+                var currentScrollTop = sidebar.scrollTop;
+                var sidebarTop = sidebar.getBoundingClientRect().top;
+                var itemTop = activeItem.getBoundingClientRect().top;
+                var relativeTop = itemTop - sidebarTop;
+                
+                // Calculate the target scroll position
+                var targetScrollTop = currentScrollTop + relativeTop - scrollOffset;
+                
+                // Ensure scroll position is not negative
+                targetScrollTop = Math.max(0, targetScrollTop);
+                
+                // Scroll to the active item
+                sidebar.scrollTop = targetScrollTop;
+            }
+        }
+        
+        // Run after DOM is fully loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', scrollToActiveMenuItem);
+        } else {
+            // DOM is already loaded
+            scrollToActiveMenuItem();
+        }
+        
+        // Also run after a short delay to ensure all dynamic content is rendered
+        setTimeout(scrollToActiveMenuItem, 100);
+    })();
     </script>
 </body>
 </html>

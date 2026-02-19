@@ -814,7 +814,25 @@ class WhatsAppServiceController extends BaseController
         validateVendorAccess('administrative');
         // ask engine to process the request
         $processReaction = $this->whatsAppServiceEngine->requestBusinessProfile($phoneNumberId);
-        // get back to controller with engine response
+
+        // if AJAX request, return rendered HTML for modal body
+        if (request()->ajax()) {
+            // extract data from EngineResponse or array
+            if (is_object($processReaction) && method_exists($processReaction, 'data')) {
+                $data = $processReaction->data() ?? [];
+            } elseif (is_array($processReaction) && array_key_exists('data', $processReaction)) {
+                $data = $processReaction['data'];
+            } else {
+                $data = [];
+            }
+
+            $phoneNumberId = $data['phoneNumberId'] ?? $phoneNumberId;
+            $businessProfile = $data['businessProfile'] ?? [];
+
+            return view('vendors.settings.business-profile-body', compact('phoneNumberId', 'businessProfile'));
+        }
+
+        // default JSON/engine response
         return $this->processResponse($processReaction, [], [], true);
     }
     function updateBusinessProfile(BaseRequestTwo $request) {
