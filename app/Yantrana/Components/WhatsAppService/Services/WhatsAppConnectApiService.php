@@ -156,6 +156,8 @@ class WhatsAppConnectApiService extends BaseEngine implements WhatsAppServiceEng
             'current_phone_number_id' => $phoneNumberId,
             // 'webhook_verified_at' => now(), // as it will be done automatically
             'webhook_messages_field_verified_at' => now(),
+            // Ensure UI and other consumers get the same phone-number list as manual setup
+            'whatsapp_phone_numbers' => $phoneNumbers,
             'whatsapp_phone_numbers_data' => $phoneNumbers,
             'whatsapp_onboarding_raw_data' => [
                 'waba_id' => $wabaId,
